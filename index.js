@@ -45,6 +45,7 @@ app.post("/single", upload.single('image'), async (req, res) => {
         }
         
         // Destructure path and filename correctly from req.file
+        const{title}=req.body
         const { path: filePath, filename } = req.file 
         
         // Save only the relative path (e.g., 'uploads/filename.png')
@@ -52,6 +53,7 @@ app.post("/single", upload.single('image'), async (req, res) => {
         const relativePath = path.join(UPLOAD_DIR, filename); 
 
         const image = new ImageModel({ 
+            title,
             path: relativePath, 
             filename: filename 
         })
@@ -93,6 +95,21 @@ app.get("/img/:id", async (req, res) => {
         res.status(500).send({ error: err.message })
     }
 })
+
+app.get("/resumes", async (req, res) => {
+  try {
+    const images = await ImageModel.find().sort({ _id: -1 }); // latest first
+    const formatted = images.map(img => ({
+      _id: img._id,
+      title: img.title,
+      filename: img.filename
+    }));
+    res.status(200).json(formatted);
+  } catch (error) {
+    console.error("Fetch error:", error);
+    res.status(500).json({ error: "Failed to fetch resumes" });
+  }
+});
 
 
 // --- Server Start ---
