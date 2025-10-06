@@ -110,6 +110,34 @@ app.get("/resumes", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch resumes" });
   }
 });
+app.delete("/resumes/:id", async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // 1. Find the image/resume in the DB
+        const image = await ImageModel.findById(id);
+        if (!image) {
+            return res.status(404).json({ msg: "Resume not found." });
+        }
+
+        // 2. Delete the file from the uploads folder
+        const filePath = path.join(__dirname, image.path);
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath); // Remove the file
+        } else {
+            console.warn(`File missing on disk: ${filePath}`);
+        }
+
+        // 3. Remove the DB entry
+        await ImageModel.findByIdAndDelete(id);
+
+        res.status(200).json({ msg: "Resume deleted successfully." });
+    } catch (error) {
+        console.error("Delete error:", error);
+        res.status(500).json({ error: "Failed to delete resume." });
+    }
+});
+
 
 
 // --- Server Start ---
