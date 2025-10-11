@@ -1,159 +1,183 @@
-const express = require('express')
-const app = express()
-const multer = require('multer')
-const mongoose = require('mongoose')
-const cors = require('cors')
-const port = 3000
-const path = require('path')
-const fs = require('fs') // Import File System module
+// --- index.js ---
+const express = require("express");
+const app = express();
+const multer = require("multer");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
+const { jwtVerify } = require("jose");
+require("dotenv").config(); // ✅ Load NEXTAUTH_SECRET and others from .env
 
-// Ensure correct relative path for the model import
-const { ImageModel } = require('./model/image.module') 
+const port = 3000;
+const { ImageModel } = require("./model/image.module");
 
-// --- Configuration ---
-const UPLOAD_DIR = './uploads'
+// --- Config ---
+const UPLOAD_DIR = "./uploads";
+app.use(cors());
+app.use(express.json());
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-app.use(cors())
-// To serve static files (the uploaded images)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'))) 
+// ✅ Verify NextAuth Token Middleware (from your NextAuth JWT)
+async function verifyNextAuthToken(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Missing Authorization header" });
+    }
 
-app.get('/', (req, res) => {
-    res.send('Image Upload Server Running!')
-})
+    const token = authHeader.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "No token provided" });
+    }
 
-// --- Multer Storage Configuration ---
+    const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET);
+    const { payload } = await jwtVerify(token, secret);
+
+    // Token generated from NextAuth jwt() callback includes `role` + `sub` or `id`
+    req.user = {
+      id: payload.id || payload.sub,
+      role: payload.role || "user",
+      email: payload.email,
+    };
+
+    next();
+  } catch (err) {
+    console.error("🔴 Token verification failed:", err.message);
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+// --- Default Route ---
+app.get("/", (req, res) => {
+  res.send("Image Upload Server Running with NextAuth Integration ✅");
+});
+
+// --- Multer Storage ---
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        // Multer will now use the UPLOAD_DIR constant
-        cb(null, UPLOAD_DIR) 
-    },
-    filename: function (req, file, cb) {
-        // Use path.extname to ensure the extension is always correct
-        const ext = path.extname(file.originalname);
-        const name = path.basename(file.originalname, ext);
-        cb(null, name + '-' + Date.now() + ext)
+  destination: function (req, file, cb) {
+    cb(null, UPLOAD_DIR);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    const name = path.basename(file.originalname, ext);
+    cb(null, name + "-" + Date.now() + ext);
+  },
+});
+
+const upload = multer({ storage });
+
+// --- Upload Image ---
+app.post("/single", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).send({ msg: "No file uploaded." });
+
+    const { title } = req.body;
+    const { filename } = req.file;
+    const relativePath = path.join(UPLOAD_DIR, filename);
+
+    const image = new ImageModel({
+      title,
+      path: relativePath,
+      filename,
+    });
+    await image.save();
+
+    res.status(201).send({
+      msg: "Image Uploaded Successfully ✅",
+      filename,
+      id: image._id,
+    });
+  } catch (error) {
+    console.error("Upload error:", error);
+    res.status(500).send({ error: error.message });
+  }
+});
+
+// ✅ --- SECURE ADMIN ROUTE ---
+app.get("/userssss", verifyNextAuthToken, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Access denied — Admins only 🚫" });
     }
-})
 
-const upload = multer({ storage })
+    const allUsers = await ImageModel.find().select("title filename _id");
+    res.status(200).json({
+      message: "✅ Admin access granted",
+      admin: req.user.email,
+      users: allUsers,
+    });
+  } catch (error) {
+    console.error("Admin user fetch error:", error);
+    res.status(500).json({ message: "Server error retrieving user data" });
+  }
+});
 
-// --- POST Route for Image Upload ---
-app.post("/single", upload.single('image'), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).send({ msg: "No file uploaded." });
-        }
-        
-        // Destructure path and filename correctly from req.file
-        const{title}=req.body
-        const { path: filePath, filename } = req.file 
-        
-        // Save only the relative path (e.g., 'uploads/filename.png')
-        // We can construct the full path later if needed.
-        const relativePath = path.join(UPLOAD_DIR, filename); 
-
-        const image = new ImageModel({ 
-            title,
-            path: relativePath, 
-            filename: filename 
-        })
-        await image.save()
-
-        res.status(201).send({ 
-            msg: "Image Uploaded Successfully",
-            filename: filename,
-            id: image._id // Return the ID to use for the GET route
-        })
-    } catch (error) {
-        console.error("Upload error:", error);
-        res.status(500).send({ error: error.message })
-    }
-})
-
-// --- GET Route to Retrieve Image ---
+// --- Get Image by ID ---
 app.get("/img/:id", async (req, res) => {
-    const { id } = req.params
-    try {
-        const image = await ImageModel.findById(id)
-        if (!image) {
-            return res.status(404).send({ "msg": "Image Not Found" })
-        }
+  const { id } = req.params;
+  try {
+    const image = await ImageModel.findById(id);
+    if (!image) return res.status(404).send({ msg: "Image Not Found" });
 
-        // The path stored in the DB is the relative path (e.g., 'uploads/...')
-        // We must join it with the current directory __dirname to make it absolute.
-        const absolutePath = path.join(__dirname, image.path) 
-
-        // Check if the file actually exists on the disk before sending
-        if (fs.existsSync(absolutePath)) {
-            // Serve the file directly
-            res.sendFile(absolutePath)
-        } else {
-            res.status(404).send({ "msg": "Image file missing on server disk." })
-        }
-    } catch (err) {
-        console.error("Retrieve error:", err);
-        res.status(500).send({ error: err.message })
+    const absolutePath = path.join(__dirname, image.path);
+    if (fs.existsSync(absolutePath)) {
+      res.sendFile(absolutePath);
+    } else {
+      res.status(404).send({ msg: "Image file missing on server disk." });
     }
-})
+  } catch (err) {
+    console.error("Retrieve error:", err);
+    res.status(500).send({ error: err.message });
+  }
+});
 
+// --- Get All Resumes ---
 app.get("/resumes", async (req, res) => {
   try {
-    const images = await ImageModel.find().sort({ _id: -1 }); // latest first
-    const formatted = images.map(img => ({
-      _id: img._id,
-      title: img.title,
-      filename: img.filename
-    }));
-    res.status(200).json(formatted);
+    const images = await ImageModel.find().sort({ _id: -1 });
+    res.status(200).json(
+      images.map((img) => ({
+        _id: img._id,
+        title: img.title,
+        filename: img.filename,
+      }))
+    );
   } catch (error) {
     console.error("Fetch error:", error);
     res.status(500).json({ error: "Failed to fetch resumes" });
   }
 });
+
+// --- Delete Resume by ID ---
 app.delete("/resumes/:id", async (req, res) => {
-    const { id } = req.params;
+  const { id } = req.params;
+  try {
+    const image = await ImageModel.findById(id);
+    if (!image) return res.status(404).json({ msg: "Resume not found." });
 
-    try {
-        // 1. Find the image/resume in the DB
-        const image = await ImageModel.findById(id);
-        if (!image) {
-            return res.status(404).json({ msg: "Resume not found." });
-        }
+    const filePath = path.join(__dirname, image.path);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-        // 2. Delete the file from the uploads folder
-        const filePath = path.join(__dirname, image.path);
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath); // Remove the file
-        } else {
-            console.warn(`File missing on disk: ${filePath}`);
-        }
-
-        // 3. Remove the DB entry
-        await ImageModel.findByIdAndDelete(id);
-
-        res.status(200).json({ msg: "Resume deleted successfully." });
-    } catch (error) {
-        console.error("Delete error:", error);
-        res.status(500).json({ error: "Failed to delete resume." });
-    }
+    await ImageModel.findByIdAndDelete(id);
+    res.status(200).json({ msg: "Resume deleted successfully ✅" });
+  } catch (error) {
+    console.error("Delete error:", error);
+    res.status(500).json({ error: "Failed to delete resume." });
+  }
 });
 
-
-
-// --- Server Start ---
+// --- Start Server ---
 app.listen(port, async () => {
-    // 1. Check and Create Uploads Directory
-    if (!fs.existsSync(UPLOAD_DIR)) {
-        fs.mkdirSync(UPLOAD_DIR)
-        console.log(`Created directory: ${UPLOAD_DIR}`)
-    }
+  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
 
-    // 2. Connect to Database
-    try {
-        await mongoose.connect("mongodb+srv://200ksuscribers_db_user:harry_123@cluster0.oovy5cs.mongodb.net/UploadImage?retryWrites=true&w=majority&appName=Cluster0")
-        console.log("DataBase is Connected")
-        console.log(`App is running on port ${port}`)
-    } catch (err) {
-        console.error("Error connecting to MongoDB:", err)
-    }
-})
+  try {
+    await mongoose.connect(
+      "mongodb+srv://200ksuscribers_db_user:harry_123@cluster0.oovy5cs.mongodb.net/UploadImage?retryWrites=true&w=majority"
+    );
+    console.log("✅ Database connected");
+    console.log(`🚀 Server running on port ${port}`);
+  } catch (err) {
+    console.error("Error connecting to MongoDB:", err);
+  }
+});
