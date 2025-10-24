@@ -4,6 +4,7 @@ const resumeSchema = new mongoose.Schema({
   uniqueId: { type: String, unique: true },
   name: { type: String, default: 'Untitled Resume' },
   resumeData: { type: Object },
+  userId: { type: String, required: true }, // Associate resume with user
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

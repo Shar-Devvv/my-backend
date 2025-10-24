@@ -3,8 +3,38 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const Resume = require('../model/resume.model');
 
-// Save resume
-router.post('/save', async (req, res) => {
+// Authentication middleware
+async function verifyNextAuthToken(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Missing Authorization header" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "No token provided" });
+    }
+
+    const { jwtVerify } = require("jose");
+    const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET);
+    const { payload } = await jwtVerify(token, secret);
+
+    req.user = {
+      id: payload.id || payload.sub,
+      role: payload.role || "user",
+      email: payload.email,
+    };
+
+    next();
+  } catch (err) {
+    console.error("🔴 Token verification failed:", err.message);
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+// Save resume (with authentication)
+router.post('/save', verifyNextAuthToken, async (req, res) => {
   try {
     const { name, resumeData } = req.body;
 
@@ -20,7 +50,8 @@ router.post('/save', async (req, res) => {
     const newResume = new Resume({
       uniqueId,
       name: name || 'Untitled Resume',
-      resumeData
+      resumeData,
+      userId: req.user.id // Associate with authenticated user
     });
 
     await newResume.save();
@@ -46,16 +77,19 @@ router.post('/save', async (req, res) => {
   }
 });
 
-// Get resume by ID
-router.get('/preview/:uniqueId', async (req, res) => {
+// Get resume by ID (with authentication)
+router.get('/preview/:uniqueId', verifyNextAuthToken, async (req, res) => {
   try {
     const { uniqueId } = req.params;
-    const resume = await Resume.findOne({ uniqueId: uniqueId });
+    const resume = await Resume.findOne({ 
+      uniqueId: uniqueId,
+      userId: req.user.id // Only allow access to user's own resumes
+    });
 
     if (!resume) {
       return res.status(404).json({
         success: false,
-        message: 'Resume not found'
+        message: 'Resume not found or access denied'
       });
     }
 
@@ -78,10 +112,10 @@ router.get('/preview/:uniqueId', async (req, res) => {
   }
 });
 
-// Get all resumes
-router.get('/all', async (req, res) => {
+// Get all resumes for authenticated user
+router.get('/all', verifyNextAuthToken, async (req, res) => {
   try {
-    const resumes = await Resume.find()
+    const resumes = await Resume.find({ userId: req.user.id })
       .sort({ createdAt: -1 })
       .select('uniqueId name createdAt')
       .limit(50);
@@ -102,25 +136,35 @@ router.get('/all', async (req, res) => {
   }
 });
 
-
-
-router.post('/api/resume/save', async (req, res) => {
+// Delete resume (with authentication)
+router.delete('/delete/:uniqueId', verifyNextAuthToken, async (req, res) => {
   try {
-    const resume = new Resume({
-      userId: req.body.userId,
-      uniqueId: generateUniqueId(), // or use _id
-      // ... other resume fields
-    });
+    const { uniqueId } = req.params;
     
-    await resume.save();
-    
-    // Return the uniqueId in the response
-    res.json({ 
-      message: 'Resume saved successfully',
-      uniqueId: resume.uniqueId || resume._id.toString()
+    const resume = await Resume.findOneAndDelete({ 
+      uniqueId: uniqueId,
+      userId: req.user.id // Only allow deletion of user's own resumes
     });
+
+    if (!resume) {
+      return res.status(404).json({
+        success: false,
+        message: 'Resume not found or access denied'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Resume deleted successfully'
+    });
+
   } catch (error) {
-    res.status(500).json({ error: 'Failed to save resume' });
+    console.error('Error deleting resume:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete resume',
+      error: error.message
+    });
   }
 });
 
