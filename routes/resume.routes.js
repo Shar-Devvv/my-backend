@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const Resume = require('../model/resume.model');
+const { verifyNextAuthToken } = require('../middleware/verifyNexthAuth');
 
 // Authentication middleware
 async function verifyNextAuthToken(req, res, next) {
