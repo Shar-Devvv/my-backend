@@ -2,37 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const Resume = require('../model/resume.model');
-const { verifyNextAuthToken } = require('../middleware/verifyNexthAuth');
-
-// Authentication middleware
-async function verifyNextAuthToken(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: "Missing Authorization header" });
-    }
-
-    const token = authHeader.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-
-    const { jwtVerify } = require("jose");
-    const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET);
-    const { payload } = await jwtVerify(token, secret);
-
-    req.user = {
-      id: payload.id || payload.sub,
-      role: payload.role || "user",
-      email: payload.email,
-    };
-
-    next();
-  } catch (err) {
-    console.error("🔴 Token verification failed:", err.message);
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-}
+const { verifyNextAuthToken } = require('../middleware/verifyNextAuth'); // ✅ use correct import
 
 // Save resume (with authentication)
 router.post('/save', verifyNextAuthToken, async (req, res) => {
