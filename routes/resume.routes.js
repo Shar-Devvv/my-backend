@@ -83,6 +83,40 @@ router.get('/preview/:uniqueId', verifyNextAuthToken, async (req, res) => {
   }
 });
 
+
+// PUBLIC: Get resume by uniqueId (NO authentication)
+router.get('/public/:uniqueId', async (req, res) => {
+  try {
+    const { uniqueId } = req.params;
+    console.log('📋 Public preview for:', uniqueId);
+    
+    const resume = await Resume.findOne({ uniqueId });
+
+    if (!resume) {
+      return res.status(404).json({
+        success: false,
+        message: 'Resume not found'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      resume: {
+        name: resume.name,
+        resumeData: resume.resumeData,
+        createdAt: resume.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch resume',
+      error: error.message
+    });
+  }
+});
+
 // Get all resumes for authenticated user
 router.get('/all', verifyNextAuthToken, async (req, res) => {
   try {
