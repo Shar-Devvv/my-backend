@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const Resume = require('../model/resume.model');
-const { verifyNextAuthToken } = require('../middleware/verifyNextAuth'); // ✅ use correct import
+const { verifyNextAuthToken } = require('../middleware/verifyNexthAuth'); // ✅ use correct import
 
 // Save resume (with authentication)
 router.post('/save', verifyNextAuthToken, async (req, res) => {
