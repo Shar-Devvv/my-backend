@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const Resume = require('../model/resume.model');
+const ViewModel = require('../model/view.model');
 const { verifyNextAuthToken } = require('../middleware/verifyNexthAuth'); // ✅ use correct import
 
 // Save resume (with authentication)
@@ -84,7 +85,74 @@ router.get('/preview/:uniqueId', verifyNextAuthToken, async (req, res) => {
 });
 
 
-// PUBLIC: Get resume by uniqueId (NO authentication)
+// Utility function to get client IP address
+function getClientIP(req) {
+  return req.headers['x-forwarded-for'] || 
+         req.headers['x-real-ip'] || 
+         req.connection.remoteAddress || 
+         req.socket.remoteAddress ||
+         (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+         req.ip ||
+         '127.0.0.1';
+}
+
+// Utility function to parse user agent and extract device info
+function parseUserAgent(userAgent) {
+  const ua = userAgent.toLowerCase();
+  
+  // Detect browser
+  let browserName = 'Unknown';
+  let browserVersion = '';
+  
+  if (ua.includes('chrome') && !ua.includes('edg')) {
+    browserName = 'Chrome';
+    const match = ua.match(/chrome\/(\d+)/);
+    if (match) browserVersion = match[1];
+  } else if (ua.includes('firefox')) {
+    browserName = 'Firefox';
+    const match = ua.match(/firefox\/(\d+)/);
+    if (match) browserVersion = match[1];
+  } else if (ua.includes('safari') && !ua.includes('chrome')) {
+    browserName = 'Safari';
+    const match = ua.match(/version\/(\d+)/);
+    if (match) browserVersion = match[1];
+  } else if (ua.includes('edg')) {
+    browserName = 'Edge';
+    const match = ua.match(/edg\/(\d+)/);
+    if (match) browserVersion = match[1];
+  }
+  
+  // Detect device type
+  let deviceType = 'desktop';
+  if (ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')) {
+    deviceType = 'mobile';
+  } else if (ua.includes('tablet') || ua.includes('ipad')) {
+    deviceType = 'tablet';
+  }
+  
+  // Detect operating system
+  let operatingSystem = 'Unknown';
+  if (ua.includes('windows')) {
+    operatingSystem = 'Windows';
+  } else if (ua.includes('mac os') || ua.includes('macos')) {
+    operatingSystem = 'macOS';
+  } else if (ua.includes('linux')) {
+    operatingSystem = 'Linux';
+  } else if (ua.includes('android')) {
+    operatingSystem = 'Android';
+  } else if (ua.includes('ios') || ua.includes('iphone') || ua.includes('ipad')) {
+    operatingSystem = 'iOS';
+  }
+  
+  return {
+    browserName,
+    browserVersion,
+    deviceType,
+    operatingSystem
+  };
+}
+
+// PUBLIC: Get resume by uniqueId (NO authentication) with automatic tracking
 router.get('/public/:uniqueId', async (req, res) => {
   try {
     const { uniqueId } = req.params;
@@ -97,6 +165,42 @@ router.get('/public/:uniqueId', async (req, res) => {
         success: false,
         message: 'Resume not found'
       });
+    }
+
+    // Track the view automatically
+    try {
+      const ipAddress = getClientIP(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown';
+      const referrerUrl = req.headers.referer || req.headers.referrer || null;
+      
+      // Parse user agent for detailed info
+      const deviceInfo = parseUserAgent(userAgent);
+      
+      // Create view record
+      const viewData = {
+        resumeId: resume._id.toString(),
+        uniqueId: uniqueId,
+        ipAddress,
+        userAgent,
+        browserName: deviceInfo.browserName,
+        browserVersion: deviceInfo.browserVersion,
+        deviceType: deviceInfo.deviceType,
+        operatingSystem: deviceInfo.operatingSystem,
+        referrerUrl,
+        sessionId: uuidv4()
+      };
+
+      // Save to database (async, don't wait for it)
+      const view = new ViewModel(viewData);
+      view.save().then(() => {
+        console.log(`📊 Resume view tracked: ${uniqueId} from ${ipAddress} (${deviceInfo.deviceType})`);
+      }).catch(err => {
+        console.error('Error tracking view:', err);
+      });
+
+    } catch (trackingError) {
+      console.error('Error in tracking:', trackingError);
+      // Don't fail the main request if tracking fails
     }
     
     res.status(200).json({
