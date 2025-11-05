@@ -24,7 +24,8 @@ const io = new Server(server, {
   cors: {
     origin: "*", // In production, specify your frontend URL
     methods: ["GET", "POST"]
-  }
+  },
+   transport: ['websocket', 'polling']
 });
 
 // --- Config ---
