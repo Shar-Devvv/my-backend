@@ -45,7 +45,7 @@ const activeRecruiters = new Map(); // recruiterEmail -> socketId
 const chatHistory = new Map(); // userId -> [{message, from, timestamp}]
 
 // The ONE recruiter who receives all messages - CHANGE THIS!
-const RECRUITER_EMAIL = "harry123@gmail.com";
+const RECRUITER_EMAIL = "hary123@gmail.com";
 
 // ✅ Verify NextAuth Token Middleware (from your NextAuth JWT)
 async function verifyNextAuthToken(req, res, next) {
